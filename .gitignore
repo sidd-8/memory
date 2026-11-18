@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo

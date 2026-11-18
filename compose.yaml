@@ -1,0 +1,106 @@
+x-backend: &backend
+  image: agent-memory-backend:local
+  pull_policy: never
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql://memory:memory@postgres:5432/memory
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg17-bookworm
+    environment:
+      POSTGRES_DB: memory
+      POSTGRES_USER: memory
+      POSTGRES_PASSWORD: memory
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U memory -d memory"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *backend
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0"]
+    environment:
+      <<: *database-url
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      MEMORY_CONTEXT_TOKEN_BUDGET: ${MEMORY_CONTEXT_TOKEN_BUDGET:-2048}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=4)"
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "worker.main"]
+    environment:
+      <<: *database-url
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_URL: ${OLLAMA_URL:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "worker.main", "--check"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: ./apps/web
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(response => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  test:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    environment:
+      TEST_DATABASE_URL: postgresql://memory:memory@postgres:5432/memory
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
+  redis-data:

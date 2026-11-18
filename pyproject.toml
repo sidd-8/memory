@@ -1,0 +1,29 @@
+[project]
+name = "agent-memory"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "alembic>=1.16,<2",
+    "fastapi>=0.120,<1",
+    "psycopg[binary]>=3.2,<4",
+    "redis>=5,<9",
+    "rq>=2.4,<3",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2,<3",
+    "pytest>=8,<10",
+    "ruff>=0.11,<1",
+]
+
+[tool.uv.workspace]
+members = ["packages/sdk-python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
