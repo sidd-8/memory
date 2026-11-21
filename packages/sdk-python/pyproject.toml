@@ -5,7 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-memory-sdk"
 version = "0.1.0"
+description = "Typed Python client for the Agent Memory API"
 requires-python = ">=3.13"
+dependencies = [
+    "httpx2>=2,<3",
+    "pydantic>=2.10,<3",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_memory"]

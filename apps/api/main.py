@@ -1,13 +1,19 @@
 import psycopg
 from fastapi import FastAPI, HTTPException
 
+from apps.api.console import router as console_router
 from apps.api.db import connect
+from apps.api.graph import router as graph_router
 from apps.api.memories import router as memory_router
+from apps.api.observability import install_observability
 from apps.api.subjects import router as subject_router
 
 app = FastAPI(title="Agent Memory API")
+install_observability(app)
 app.include_router(subject_router)
 app.include_router(memory_router)
+app.include_router(graph_router)
+app.include_router(console_router)
 
 
 @app.get("/healthz")

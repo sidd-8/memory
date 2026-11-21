@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from psycopg import Connection
 from psycopg.types.json import Jsonb
+from pydantic import ValidationError
 
 from apps.api.auth import AgentAccess
 from apps.api.memory_models import (
@@ -18,13 +19,14 @@ from apps.api.memory_models import (
     MemoryPatch,
     MemorySnapshot,
     MemorySummary,
+    MemoryTiming,
     Source,
     SourceInput,
 )
 
 SUMMARY_COLUMNS = """
     id, workspace_id, subject_id, category, content, expires_at,
-    revision, created_at, updated_at
+    revision, created_at, updated_at, starts_at, ends_at, timezone, state
 """
 
 
@@ -74,7 +76,7 @@ def get_memory(
             ORDER BY history.revision DESC LIMIT %s
         ) AS history
         FROM memories memory
-        JOIN memory_versions current
+        JOIN current_memory_snapshots current
             ON (current.workspace_id, current.subject_id, current.memory_id, current.revision)
              = (memory.workspace_id, memory.subject_id, memory.id, memory.revision)
         WHERE memory.workspace_id = %s AND memory.subject_id = %s AND memory.id = %s
@@ -169,6 +171,12 @@ def insert_claim(
             extraction_model,
         ),
     ).fetchone()
+    if conflicting_claims(db, scope, row["id"]):
+        db.execute(
+            "UPDATE claims SET status = 'review_due' WHERE (workspace_id, subject_id, id) = (%s, %s, %s)",
+            (*scope, row["id"]),
+        )
+        row["status"] = "review_due"
     if subject is not None and target is not None:
         db.execute(
             """
@@ -189,9 +197,41 @@ def insert_claim(
     )
 
 
-def _replay(
-    db: Connection, access: AgentAccess, key_digest: bytes, request_digest: bytes
+def conflicting_claims(
+    db: Connection, scope: tuple[UUID, UUID], claim_id: UUID
+) -> set[UUID]:
+    rows = db.execute(
+        """
+        SELECT incumbent.id FROM claims AS target
+        JOIN claims AS incumbent ON (incumbent.workspace_id, incumbent.subject_id, incumbent.predicate)
+            = (target.workspace_id, target.subject_id, target.predicate)
+            AND incumbent.subject_entity_id IS NOT DISTINCT FROM target.subject_entity_id
+        WHERE (target.workspace_id, target.subject_id, target.id) = (%s, %s, %s)
+            AND incumbent.id <> target.id AND incumbent.verified_at IS NOT NULL
+            AND incumbent.superseded_at IS NULL AND incumbent.status <> 'archived'
+            AND (incumbent.object_entity_id, incumbent.object_value)
+                IS DISTINCT FROM (target.object_entity_id, target.object_value)
+            AND tstzrange(incumbent.valid_from, incumbent.valid_to, '[)')
+                && tstzrange(target.valid_from, target.valid_to, '[)')
+        """,
+        (*scope, claim_id),
+    ).fetchall()
+    return {row["id"] for row in rows}
+
+
+def write_fingerprint(key: str | None, request: list) -> tuple[bytes, bytes] | None:
+    if key is None:
+        return None
+    encoded = json.dumps(request, sort_keys=True)
+    return sha256(key.encode()).digest(), sha256(encoded.encode()).digest()
+
+
+def replay_write(
+    db: Connection, access: AgentAccess, fingerprint: tuple[bytes, bytes] | None
 ) -> MemorySnapshot | None:
+    if fingerprint is None:
+        return None
+    key_digest, request_digest = fingerprint
     row = db.execute(
         """
         SELECT requests.request_digest, versions.snapshot
@@ -219,18 +259,44 @@ def _replace_claims(
     memory_id: UUID,
     source: Source,
     claims: list[ClaimInput],
+    previous: list[Claim],
 ) -> list[Claim]:
     db.execute(
         """
         UPDATE claims SET status = 'superseded', superseded_at = clock_timestamp()
         WHERE workspace_id = %s AND subject_id = %s AND memory_id = %s
-            AND superseded_at IS NULL
+            AND superseded_at IS NULL AND verified_at IS NULL AND status <> 'archived'
         """,
         (*_scope(access), memory_id),
     )
-    return [
+    return [claim for claim in previous if claim.verified_at is not None] + [
         insert_claim(db, _scope(access), memory_id, source, claim) for claim in claims
     ]
+
+
+def _timing(
+    data: MemoryCreate | MemoryPatch, previous: MemorySnapshot | None = None
+) -> tuple:
+    fields = ("starts_at", "ends_at", "timezone", "state")
+    before = {field: getattr(previous, field) for field in fields} if previous else {}
+    changes = data.model_dump(include=set(fields), exclude_unset=True)
+    try:
+        timing = MemoryTiming.model_validate({**before, **changes})
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
+    if timing.state == "confirmed":
+        source = data.source or (previous.source if previous else None)
+        changed = timing.model_dump() != before
+        if (
+            source is None
+            or source.trust_class not in {"user_confirmed", "authoritative"}
+            or (changed and data.source is None)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Confirmation requires an authoritative or user-confirmed source",
+            )
+    return tuple(getattr(timing, field) for field in fields)
 
 
 def write_memory(
@@ -241,29 +307,34 @@ def write_memory(
     idempotency_key: str | None,
 ) -> MemorySnapshot:
     lock_subject(db, _scope(access))
-    if idempotency_key is not None:
-        key_digest = sha256(idempotency_key.encode()).digest()
-        encoded = json.dumps(
-            [str(memory_id), data.model_dump(mode="json", exclude_unset=True)],
-            sort_keys=True,
-        )
-        request_digest = sha256(encoded.encode()).digest()
-        replay = _replay(db, access, key_digest, request_digest)
-        if replay is not None:
-            return replay
+    fingerprint = write_fingerprint(
+        idempotency_key,
+        [str(memory_id), data.model_dump(mode="json", exclude_unset=True)],
+    )
+    replay = replay_write(db, access, fingerprint)
+    if replay is not None:
+        return replay
 
     if isinstance(data, MemoryCreate):
         row = db.execute(
             f"""
-            INSERT INTO memories (workspace_id, subject_id, category, content, expires_at, extraction_status)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING {SUMMARY_COLUMNS}
+            INSERT INTO memories (workspace_id, subject_id, category, content, expires_at, extraction_status,
+                starts_at, ends_at, timezone, state)
+            VALUES (%s, %s, %s, %s,
+                CASE WHEN %s THEN %s::timestamptz ELSE (
+                    SELECT statement_timestamp() + make_interval(days => default_retention_days)
+                    FROM workspaces WHERE id = %s
+                ) END, %s, %s, %s, %s, %s) RETURNING {SUMMARY_COLUMNS}
             """,
             (
                 *_scope(access),
                 data.category,
                 data.content,
+                "expires_at" in data.model_fields_set,
                 data.expires_at,
+                access.workspace_id,
                 "pending" if data.extract_claims else "disabled",
+                *_timing(data),
             ),
         ).fetchone()
         source = _source(db, access, row["id"], data.source)
@@ -289,6 +360,7 @@ def write_memory(
             UPDATE memories
             SET category = COALESCE(%s, category), content = COALESCE(%s, content),
                 expires_at = %s, embedding = NULL, embedding_model = NULL,
+                starts_at = %s, ends_at = %s, timezone = %s, state = %s,
                 index_due_at = clock_timestamp(), index_attempts = 0,
                 extraction_status = COALESCE(%s, extraction_status),
                 revision = revision + 1,
@@ -302,6 +374,7 @@ def write_memory(
                 data.expires_at
                 if "expires_at" in data.model_fields_set
                 else previous.expires_at,
+                *_timing(data, previous),
                 extraction_status,
                 *_scope(access),
                 memory_id,
@@ -314,7 +387,7 @@ def write_memory(
         )
         claims = previous.claims
         if data.claims is not None:
-            claims = _replace_claims(db, access, memory_id, source, data.claims)
+            claims = _replace_claims(db, access, memory_id, source, data.claims, claims)
 
     snapshot = MemorySnapshot.model_validate(
         {
@@ -325,7 +398,17 @@ def write_memory(
         }
     )
     save_revision(db, snapshot)
-    if idempotency_key is not None:
+    save_write_request(db, access, fingerprint, snapshot)
+    return snapshot
+
+
+def save_write_request(
+    db: Connection,
+    access: AgentAccess,
+    fingerprint: tuple[bytes, bytes] | None,
+    snapshot: MemorySnapshot,
+) -> None:
+    if fingerprint is not None:
         db.execute(
             """
             INSERT INTO memory_requests (
@@ -335,13 +418,11 @@ def write_memory(
             (
                 *_scope(access),
                 access.agent_id,
-                key_digest,
-                request_digest,
+                *fingerprint,
                 snapshot.id,
                 snapshot.revision,
             ),
         )
-    return snapshot
 
 
 def save_revision(db: Connection, snapshot: MemorySnapshot) -> None:

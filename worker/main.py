@@ -6,7 +6,6 @@ from multiprocessing import get_context
 from redis import Redis
 from rq import Queue, Worker
 
-from apps.api.model_client import model_enabled
 from worker.indexing import dispatch
 
 
@@ -19,16 +18,13 @@ def main():
         )
 
     queue = Queue("memory", connection=connection, serializer="json")
-    dispatcher = None
-    if model_enabled():
-        dispatcher = get_context("spawn").Process(target=dispatch, daemon=True)
-        dispatcher.start()
+    dispatcher = get_context("spawn").Process(target=dispatch, daemon=True)
+    dispatcher.start()
     try:
         Worker([queue], connection=connection, name=name, serializer="json").work()
     finally:
-        if dispatcher is not None:
-            dispatcher.terminate()
-            dispatcher.join()
+        dispatcher.terminate()
+        dispatcher.join()
 
 
 if __name__ == "__main__":

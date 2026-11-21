@@ -1,11 +1,15 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
+from pydantic import AwareDatetime
 
-from apps.api import memory_store, search
+from apps.api import claim_lifecycle, memory_store, search
 from apps.api.auth import AgentAccess, Database, Scope, require_subject
+from apps.api.console import record_retrieval
 from apps.api.memory_models import (
+    Claim,
+    ClaimReview,
     MemoryCreate,
     MemoryDetail,
     MemoryPage,
@@ -17,6 +21,7 @@ router = APIRouter(prefix="/v1/memories")
 ReadAccess = Annotated[AgentAccess, Depends(require_subject(Scope.MEMORY_READ))]
 WriteAccess = Annotated[AgentAccess, Depends(require_subject(Scope.MEMORY_WRITE))]
 DeleteAccess = Annotated[AgentAccess, Depends(require_subject(Scope.MEMORY_DELETE))]
+VerifyAccess = Annotated[AgentAccess, Depends(require_subject(Scope.MEMORY_VERIFY))]
 IdempotencyKey = Annotated[str | None, Header(min_length=1, max_length=128)]
 
 
@@ -42,9 +47,12 @@ def list_memories(
 
 @router.post("/search")
 def search_memories(
-    data: search.SearchRequest, access: ReadAccess, db: Database
+    data: search.SearchRequest, access: ReadAccess, db: Database, response: Response
 ) -> search.SearchResult:
-    return search.search(db, access, data)
+    result, embedding_seconds = search.search(db, access, data)
+    record_retrieval(db, access, result)
+    response.headers["Server-Timing"] = f"embedding;dur={embedding_seconds * 1000:.3f}"
+    return result
 
 
 @router.get("/{memory_id}")
@@ -69,6 +77,29 @@ def update_memory(
     idempotency_key: IdempotencyKey = None,
 ) -> MemorySnapshot:
     return memory_store.write_memory(db, access, data, memory_id, idempotency_key)
+
+
+@router.get("/{memory_id}/claims")
+def list_claims(
+    memory_id: UUID,
+    access: ReadAccess,
+    db: Database,
+    valid_at: AwareDatetime | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0, le=2147483647)] = 0,
+) -> list[Claim]:
+    return claim_lifecycle.list_claims(db, access, memory_id, valid_at, limit, offset)
+
+
+@router.post("/{memory_id}/verify")
+def verify_claim(
+    memory_id: UUID,
+    data: ClaimReview,
+    access: VerifyAccess,
+    db: Database,
+    idempotency_key: IdempotencyKey = None,
+) -> Claim:
+    return claim_lifecycle.review_claim(db, access, memory_id, data, idempotency_key)
 
 
 @router.delete("/{memory_id}", status_code=204)

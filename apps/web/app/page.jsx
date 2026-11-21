@@ -1,7 +1,5 @@
+import Console from "./ui/console";
+
 export default function Home() {
-  return (
-    <main>
-      <h1>Agent Memory</h1>
-    </main>
-  );
+  return <Console />;
 }

@@ -1,0 +1,246 @@
+{
+  "cases": [
+    {
+      "id": "database",
+      "content": "Inventory uses PostgreSQL for durable product records and transactional updates. The client connects through the postgres service.",
+      "queries": [
+        "What database stores product records?",
+        "Where do inventory transactions persist?",
+        "What backs the catalog data?",
+        "Which relational engine saves inventory changes?",
+        "Which service does the inventory client connect to?"
+      ]
+    },
+    {
+      "id": "queue",
+      "content": "Redis stores pending job messages for the extraction worker. Its append-only log survives ordinary container restarts.",
+      "queries": [
+        "What queues extraction jobs?",
+        "Where is async work buffered?",
+        "How do pending tasks survive a container restart?",
+        "What broker feeds the background worker?",
+        "Which component persists the work queue?"
+      ]
+    },
+    {
+      "id": "rollback",
+      "content": "To roll back a failed release, pause writes, restore the pre-upgrade database snapshot into a separate database, and start the previous app image against it.",
+      "queries": [
+        "How do we undo a failed release?",
+        "Which data copy should a rollback use?",
+        "What do we do before switching to the old image?",
+        "How do we return to the last version after a bad migration?",
+        "What is the recovery order for application rollback?"
+      ]
+    },
+    {
+      "id": "backup",
+      "content": "The nightly backup job makes a PostgreSQL custom-format dump at 02:00 UTC, encrypts it, and keeps it for seven days.",
+      "queries": [
+        "When does the nightly backup run?",
+        "How long are database dumps retained?",
+        "Are backup files encrypted?",
+        "What archive format does the backup job write?",
+        "What is the schedule for the routine database copy?"
+      ]
+    },
+    {
+      "id": "dinner",
+      "content": "Sam confirmed Friday dinner at 7 p.m. Eastern at Juniper Cafe. The event runs for one hour.",
+      "queries": [
+        "Where is dinner on Friday?",
+        "What did Sam confirm for this evening?",
+        "When does the meal start?",
+        "How long is the Juniper Cafe booking?",
+        "Is Friday evening blocked by a confirmed meal?"
+      ]
+    },
+    {
+      "id": "oncall",
+      "content": "Maya is the primary on-call engineer this week. Owen handles escalations while she is offline.",
+      "queries": [
+        "Who is the primary on-call this week?",
+        "Who should handle incidents if Maya is unavailable?",
+        "Which engineer takes escalations after hours?",
+        "Who owns the initial pager duty?",
+        "Who is the backup for incident response?"
+      ]
+    },
+    {
+      "id": "release",
+      "content": "The release window opens Wednesday at 16:00 UTC. Engineering freezes merges 30 minutes before deployment.",
+      "queries": [
+        "When is the shipping window?",
+        "What is the Wednesday deployment time?",
+        "When should merge activity stop before deploy?",
+        "What is the pre-release code freeze lead time?",
+        "Which day is the engineering release slot?"
+      ]
+    },
+    {
+      "id": "cache",
+      "content": "A product-price cache uses a five-minute TTL. Writers invalidate the cached item immediately after a price update.",
+      "queries": [
+        "How long can a cached price live?",
+        "What happens to cached prices after a write?",
+        "When are stale items removed from the price cache?",
+        "What is the cache expiration for products?",
+        "How do price changes invalidate read results?"
+      ]
+    },
+    {
+      "id": "search",
+      "content": "The search service blends PostgreSQL full-text results with cosine vector similarity using reciprocal rank fusion.",
+      "queries": [
+        "How are keyword and vector search combined?",
+        "Which distance measure does semantic search use?",
+        "How does the app merge the two ranked lists?",
+        "What ranking strategy combines lexical and semantic results?",
+        "Is text matching part of retrieval ranking?"
+      ]
+    },
+    {
+      "id": "schema",
+      "content": "Alembic applies database schema changes before the API starts. Migration 0007 added workspace defaults and retrieval activity.",
+      "queries": [
+        "What applies database schema revisions?",
+        "Which revision added retrieval activity?",
+        "When do migrations run relative to startup?",
+        "What tool manages the SQL schema?",
+        "Where were workspace defaults introduced?"
+      ]
+    },
+    {
+      "id": "timezone",
+      "content": "Calendar commitments store their instants in UTC and retain the original IANA timezone. America/New_York is used for Eastern events.",
+      "queries": [
+        "How does the app represent appointment timestamps?",
+        "Does a commitment retain its original timezone?",
+        "Which timezone label is used for Eastern events?",
+        "What is stored when clocks change for appointments?",
+        "How do we retain an event's original timezone information?"
+      ]
+    },
+    {
+      "id": "keys",
+      "content": "Bearer keys grant individual operations for a single workspace and subject. The database saves a SHA-256 digest of the secret.",
+      "queries": [
+        "What limits an agent API key?",
+        "Is the raw bearer secret stored in the database?",
+        "How are agent keys hashed?",
+        "Can a single key authorize all subjects?",
+        "How is API credential access scoped?"
+      ]
+    },
+    {
+      "id": "freshness",
+      "content": "Verified employment claims are reviewed after 90 days by default. Missing the deadline marks them stale while preserving the evidence.",
+      "queries": [
+        "When should verified employment be checked again?",
+        "What happens when the job claim review is overdue?",
+        "How long does a confirmed role stay fresh?",
+        "Does an overdue employment review erase evidence?",
+        "What is the default recheck period for employer facts?"
+      ]
+    },
+    {
+      "id": "graph",
+      "content": "The dependency graph shows one hop by default. Opening the two-hop view reveals relationships linked through a neighboring entity.",
+      "queries": [
+        "How many hops does the default graph show?",
+        "How do I see an indirect relationship?",
+        "Where can I inspect connections beyond direct neighbors?",
+        "How far does the entity graph expand initially?",
+        "How do I see a dependency of a dependency?"
+      ]
+    },
+    {
+      "id": "retention",
+      "content": "Workspace retention defaults apply only when a new memory omits expires_at. Expired rows are omitted from search but remain accessible to a direct authorized read until deletion.",
+      "queries": [
+        "Can expired memories still be read by ID?",
+        "When is the workspace retention default applied?",
+        "What happens to expired records in retrieval?",
+        "Can a caller override the default lifetime?",
+        "Are expired records automatically deleted?"
+      ]
+    },
+    {
+      "id": "browser",
+      "content": "The local web console is served on port 3000. The browser keeps the scoped API key in memory for its current session.",
+      "queries": [
+        "What port serves the console?",
+        "Where does the browser keep the API token?",
+        "How do I reach the UI locally?",
+        "Do browser credentials persist across page reloads?",
+        "Which interface listens on port 3000?"
+      ]
+    },
+    {
+      "id": "worker",
+      "content": "Local Ollama runs Qwen3 4B to extract candidate claims asynchronously when a memory write opts in.",
+      "queries": [
+        "Which model extracts claims?",
+        "How is candidate extraction enabled?",
+        "Does creating a memory automatically run extraction?",
+        "What performs background claim parsing on this machine?",
+        "Which local service handles candidate generation?"
+      ]
+    },
+    {
+      "id": "sdk",
+      "content": "The Python client retries GET operations and idempotency-keyed writes up to two times. Search and delete make one attempt.",
+      "queries": [
+        "Which SDK calls are retried?",
+        "How many times can a read retry?",
+        "Does the client retry deletion by default?",
+        "What protects a retried write from duplication?",
+        "How does the Python SDK retry a failed write?"
+      ]
+    },
+    {
+      "id": "support",
+      "content": "Pilot developers report onboarding problems to the internal support issue tracker. Include the response request ID and the endpoint name.",
+      "queries": [
+        "Where do pilot users report onboarding trouble?",
+        "What should a developer attach to a support report?",
+        "How do I report a first-write problem?",
+        "Where should an integration issue be logged?",
+        "Which ID helps operators find the matching request?"
+      ]
+    },
+    {
+      "id": "alerts",
+      "content": "The operations alert fires when API readiness fails three consecutive probes. A single failure is recorded without paging anyone.",
+      "queries": [
+        "How many failed readiness probes trigger a page?",
+        "What causes the API health alert?",
+        "Does one failed health check notify on-call?",
+        "How is repeated API unavailability detected?",
+        "Which readiness failures raise an operations alert?"
+      ]
+    }
+  ],
+  "distractors": [
+    "Analytics exports product snapshots to object storage for monthly financial reporting.",
+    "An email digest summarizes completed background jobs for the engineering group.",
+    "Feature flags can turn off the experimental rendering path in a deployed service.",
+    "The documentation site publishes a weekly export of its public help articles.",
+    "Sam prefers an outdoor table when the weather is warm.",
+    "The customer support roster assigns two people to morning chat shifts.",
+    "Design reviews are scheduled every Tuesday afternoon.",
+    "The pricing team updates currency conversions after market close.",
+    "The recommendation service sorts items by popularity and available stock.",
+    "Each integration submits a JSON schema for its webhook payload.",
+    "The Singapore team uses a shared calendar for office closures.",
+    "Device login accepts a separate one-time authorization code.",
+    "The recruitment team archives interview evaluations after the hiring cycle.",
+    "The dependency report lists owners for archived libraries.",
+    "Tax invoices are retained under a separate accounting policy.",
+    "The mobile app stores theme preferences locally on each device.",
+    "The nightly summarizer drafts a weekly activity digest for operations.",
+    "The Java client uses exponential reconnect delays for its event stream.",
+    "The customer support portal records feedback about subscription changes.",
+    "An infrastructure dashboard displays network throughput and available disk space."
+  ]
+}

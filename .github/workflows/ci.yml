@@ -24,10 +24,10 @@ jobs:
           node-version: "24"
       - name: Python checks
         run: |
-          uv sync --locked
-          uv run --locked ruff check .
-          uv run --locked ruff format --check .
-          uv run --locked python -m pytest
+          uv sync --locked --all-packages
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          uv run --no-sync python -m pytest
       - name: Web checks
         working-directory: apps/web
         run: |

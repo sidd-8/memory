@@ -35,6 +35,18 @@ def _add_member(db, workspace_id: UUID, identifier: str, role: str):
     ).fetchone()
 
 
+def issue_agent_key(db, workspace_id, subject_id, agent_id, scopes):
+    token = "am_" + secrets.token_urlsafe(32)
+    key = db.execute(
+        """
+        INSERT INTO api_keys (workspace_id, agent_id, subject_id, token_digest, scopes)
+        VALUES (%s, %s, %s, %s, %s) RETURNING id AS key_id
+        """,
+        (workspace_id, agent_id, subject_id, token_digest(token), sorted(set(scopes))),
+    ).fetchone()
+    return {**key, "api_key": token}
+
+
 def _execute(db, args):
     if args.command == "create-workspace":
         workspace = db.execute(
@@ -61,21 +73,9 @@ def _execute(db, args):
             (args.workspace_id, args.kind, args.reference),
         ).fetchone()
     if args.command == "issue-key":
-        token = "am_" + secrets.token_urlsafe(32)
-        key = db.execute(
-            """
-            INSERT INTO api_keys (workspace_id, agent_id, subject_id, token_digest, scopes)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id AS key_id
-            """,
-            (
-                args.workspace_id,
-                args.agent_id,
-                args.subject_id,
-                token_digest(token),
-                sorted(set(args.scope)),
-            ),
-        ).fetchone()
-        return {**key, "api_key": token}
+        return issue_agent_key(
+            db, args.workspace_id, args.subject_id, args.agent_id, args.scope
+        )
 
     return db.execute(
         """

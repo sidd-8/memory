@@ -18,6 +18,7 @@ class Scope(StrEnum):
     MEMORY_VERIFY = "memory:verify"
     MEMORY_DELETE = "memory:delete"
     GRAPH_READ = "graph:read"
+    WORKSPACE_MANAGE = "workspace:manage"
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ class AgentAccess:
     subject_id: UUID
     agent_id: UUID
     key_id: UUID
+    scopes: tuple[str, ...]
 
 
 Database = Annotated[psycopg.Connection, Depends(request_database, scope="function")]
@@ -38,7 +40,7 @@ def token_digest(token: str) -> bytes:
     return sha256(token.encode()).digest()
 
 
-def require_subject(scope: Scope):
+def require_subject(scope: Scope | None):
     def authorize(
         workspace_id: UUID, subject_id: UUID, credentials: BearerToken, db: Database
     ) -> AgentAccess:
@@ -55,10 +57,14 @@ def require_subject(scope: Scope):
                 if (
                     key["workspace_id"] == workspace_id
                     and key["subject_id"] == subject_id
-                    and scope in key["scopes"]
+                    and (scope is None or scope in key["scopes"])
                 ):
                     return AgentAccess(
-                        workspace_id, subject_id, key["agent_id"], key["key_id"]
+                        workspace_id,
+                        subject_id,
+                        key["agent_id"],
+                        key["key_id"],
+                        tuple(key["scopes"]),
                     )
                 raise HTTPException(status_code=403, detail="Access denied")
 

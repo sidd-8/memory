@@ -11,10 +11,10 @@ available to services on the Compose network.
 ## Checks
 
 ```sh
-uv sync --locked
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-uv run --locked python -m pytest
+uv sync --locked --all-packages
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
+uv run --no-sync python -m pytest
 pnpm --dir apps/web install --frozen-lockfile
 pnpm --dir apps/web lint
 pnpm --dir apps/web format:check
@@ -23,7 +23,7 @@ docker compose run --build --rm test
 ```
 
 The smoke test requires a running stack and checks API readiness, the web
-scaffold, the pgvector migration, Redis, and worker registration.
+console, the pgvector migration, Redis, and worker registration.
 The Compose test service runs the PostgreSQL integration tests in temporary schemas.
 
 ## Local identity provisioning
@@ -52,6 +52,26 @@ digest. Send the key as a bearer token to
 `GET /v1/workspaces/{workspace_id}/subjects/{subject_id}`. Use `revoke-key
 WORKSPACE_ID KEY_ID` to revoke it. The API returns 401 for missing, invalid, or
 revoked keys and 403 for a valid key without the requested permissions.
+
+## Connect the web console
+
+Open the [local console](http://localhost:3000). Enter the workspace ID, subject
+ID, and an agent API key. The browser keeps the key in memory for that session.
+Use `memory:read` for browsing and retrieval, `memory:write` for edits,
+`memory:verify` for claim reviews, `memory:delete` for deletion, and
+`graph:read` for the graph.
+
+For workspace administration, use the local `issue-key` command above with
+`--scope workspace:manage` and any other permissions you need. This scope
+allows workspace-wide agent registration and default-policy changes. Key
+issuance and revocation in the console are limited to the connected subject.
+Workspace management keys are issued and revoked through local provisioning.
+Retention defaults apply to new records that omit `expires_at`. Review
+defaults apply on the next verification that omits `review_interval_days`.
+
+Run the web app outside Docker with `pnpm --dir apps/web dev`. The server
+forwards requests to the local API at port 8000. Set `API_INTERNAL_URL` to
+override that address.
 
 ## Memory records
 
@@ -83,10 +103,11 @@ A create request contains a category, content, and source. For example:
 ```
 
 Claims are optional. Each submitted batch shares the supplied evidence source
-and starts as candidates. A patch that changes content or submits replacement
-claims requires a source. Omitting `claims` preserves the current claims.
-Sending an empty list supersedes the current claims for that memory. Earlier
-revisions retain their original evidence.
+and starts as candidates or flags overlapping conflicts for review. A patch
+that changes content or submits replacement claims requires a source. Omitting
+`claims` preserves the current claims. Sending a claims list replaces
+unverified candidates and preserves verified claims for explicit review.
+Earlier revisions retain their original evidence.
 
 Use `limit` and `after` for listing, and `revision_limit` and
 `revision_before` for history. The API returns the next cursor when more
@@ -95,6 +116,29 @@ the same request safely. Reusing the key for a different request returns 409.
 Deletion removes the memory and its history, evidence, embedding, and edges.
 Entities used by other memories are kept. Retrying an idempotent write after
 its memory was deleted returns 409.
+
+## Claim verification and history
+
+Use `POST /v1/memories/{memory_id}/verify` with a `memory:verify` key and the
+workspace and subject query parameters. Send `claim_id` and an `outcome` of
+`verified`, `needs_review`, or `archived`. Supply an `Idempotency-Key` for a
+retryable review. The result records the reviewer and review time.
+
+Verification sets `verified_at` and a review deadline. The default is 90 days
+for employment and roles, 60 for project claims, 180 for preferences and
+procedural claims, and 7 for working context. Other claims have no default
+deadline. Set `review_interval_days` to override the default or send
+`null` to omit the deadline. Overdue active claims appear as stale immediately
+in reads, and the worker records that change during its scheduled pass.
+
+For the same subject entity and predicate, a different value with an
+overlapping validity interval is flagged as `review_due`. To confirm a
+replacement, supply `supersedes_claim_id` when verifying the replacement.
+Its `valid_from` becomes the previous claim's exclusive `valid_to`.
+`GET /v1/memories/{memory_id}/claims?valid_at=...` reads claims that applied
+at a timestamp, including superseded or archived claims. Claim responses show
+when a claim applied and when the system recorded, reviewed, verified, or
+superseded it. Memory detail includes prior revisions as they were recorded.
 
 ## Extraction and search
 
@@ -124,6 +168,40 @@ unavailable. Expired records are excluded.
 Set `MEMORY_CONTEXT_TOKEN_BUDGET` in `.env` to change the server cap
 (default 2048). The API caps the compact UTF-8 bytes of the returned evidence
 array as a conservative token bound. Treat evidence text as untrusted data.
+
+## Time windows and relationship graphs
+
+Memory writes accept `starts_at`, `ends_at`, and `timezone` together, with an
+optional `state`. Use timestamps with explicit offsets and an IANA timezone.
+The API stores and returns the instants in UTC and preserves the timezone.
+Confirming or rescheduling a confirmed memory requires a source with
+`trust_class` of `user_confirmed` or `authoritative`.
+
+For a dinner conflict, have one agent save a `commitment` memory for November
+20, 2026, from 7–8 p.m. New York time with `state` set to `confirmed`. Restart the API with
+`docker compose restart api`. Then have another agent with `memory:read`
+for the same workspace and subject send this body to `POST /v1/memories/search`.
+
+```json
+{
+  "time_range": {
+    "starts_at": "2026-11-20T19:30:00-05:00",
+    "ends_at": "2026-11-20T20:30:00-05:00"
+  },
+  "status": "confirmed"
+}
+```
+
+A window-only search uses the timestamps directly and returns each overlap
+with its source ID. An interval that starts exactly at another interval's end
+counts as adjacent. Patch the dinner to `state: cancelled` to remove it from
+confirmed overlap results.
+
+Use `GET /v1/entities/{entity_id}/graph` with a `graph:read` key and the usual
+workspace and subject query parameters. Get entity IDs from relationship
+claims. The graph returns one hop by default, or two with `depth=2`. Use
+`edge_limit` to cap the result and `valid_at` to inspect the graph at a past
+instant. Edges include claim and source IDs, validity dates, and claim status.
 
 ## Migrations and shutdown
 

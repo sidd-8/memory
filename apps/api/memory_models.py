@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal, Self
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     AwareDatetime,
@@ -8,6 +9,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -19,6 +21,7 @@ ClaimStatus = Literal[
     "candidate", "active", "review_due", "stale", "superseded", "archived"
 ]
 ExtractionStatus = Literal["disabled", "pending", "complete", "rejected"]
+MemoryState = Literal["tentative", "confirmed", "cancelled", "superseded", "completed"]
 ShortText = Annotated[
     str,
     StringConstraints(
@@ -41,6 +44,55 @@ Content = Annotated[
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class TimeRange(Input):
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def check_order(self) -> Self:
+        if self.starts_at >= self.ends_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
+
+
+class TemporalFields(Input):
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime | None = None
+    timezone: ShortText | None = None
+    state: MemoryState | None = None
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def normalize_time(cls, value: datetime | None) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
+
+    @field_validator("timezone")
+    @classmethod
+    def check_timezone(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                ZoneInfo(value)
+            except (ValueError, ZoneInfoNotFoundError) as exc:
+                raise ValueError("Use a valid IANA time zone") from exc
+        return value
+
+
+class MemoryTiming(TemporalFields):
+    @model_validator(mode="after")
+    def check_window(self) -> Self:
+        if any(
+            value is not None
+            for value in (self.starts_at, self.ends_at, self.timezone, self.state)
+        ):
+            if self.starts_at is None or self.ends_at is None or self.timezone is None:
+                raise ValueError(
+                    "A time window requires starts_at, ends_at, and timezone"
+                )
+            if self.starts_at >= self.ends_at:
+                raise ValueError("ends_at must be after starts_at")
+        return self
 
 
 class SourceInput(Input):
@@ -78,7 +130,7 @@ class ClaimInput(Input):
 Claims = Annotated[list[ClaimInput], Field(max_length=32)]
 
 
-class MemoryCreate(Input):
+class MemoryCreate(MemoryTiming):
     category: Category
     content: Content
     expires_at: AwareDatetime | None = None
@@ -87,7 +139,7 @@ class MemoryCreate(Input):
     extract_claims: bool = False
 
 
-class MemoryPatch(Input):
+class MemoryPatch(TemporalFields):
     category: Category | None = None
     content: Content | None = None
     expires_at: AwareDatetime | None = None
@@ -99,7 +151,10 @@ class MemoryPatch(Input):
     def check_changes(self) -> Self:
         if not self.model_fields_set:
             raise ValueError("Provide at least one field to update")
-        for field in self.model_fields_set - {"expires_at"}:
+        for field in self.model_fields_set - {
+            "expires_at",
+            *TemporalFields.model_fields,
+        }:
             if getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
         if ("content" in self.model_fields_set or self.claims) and self.source is None:
@@ -125,9 +180,33 @@ class Claim(ClaimInput):
     status: ClaimStatus
     created_at: datetime
     extraction_model: str | None = None
+    superseded_at: datetime | None = None
+    verified_at: datetime | None = None
+    verified_by: UUID | None = None
+    review_due_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: UUID | None = None
 
 
-class MemorySummary(BaseModel):
+class ClaimReview(Input):
+    claim_id: UUID
+    outcome: Literal["verified", "needs_review", "archived"]
+    supersedes_claim_id: UUID | None = None
+    review_interval_days: Annotated[int, Field(ge=1, le=3650)] | None = None
+
+    @model_validator(mode="after")
+    def check_review(self) -> Self:
+        if self.outcome != "verified" and (
+            self.supersedes_claim_id is not None
+            or "review_interval_days" in self.model_fields_set
+        ):
+            raise ValueError("Supersession and review intervals require verification")
+        if self.claim_id == self.supersedes_claim_id:
+            raise ValueError("A claim cannot supersede itself")
+        return self
+
+
+class MemorySummary(MemoryTiming):
     id: UUID
     workspace_id: UUID
     subject_id: UUID

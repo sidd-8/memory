@@ -14,7 +14,8 @@ COPY alembic.ini .
 COPY migrations migrations
 
 FROM backend AS test
-RUN uv sync --locked --no-install-workspace
+COPY packages/sdk-python/src packages/sdk-python/src
+RUN uv sync --locked --all-packages
 COPY tests tests
 CMD ["python", "-m", "pytest", "-q"]
 

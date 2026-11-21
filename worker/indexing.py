@@ -7,6 +7,7 @@ from redis import Redis
 from redis.exceptions import RedisError
 from rq import Queue
 
+from apps.api.claim_lifecycle import mark_overdue_claims
 from apps.api.db import connect
 from apps.api.memory_models import ClaimInput, MemorySnapshot
 from apps.api.memory_store import insert_claim, lock_subject, save_revision
@@ -17,6 +18,7 @@ from apps.api.model_client import (
     ModelUnavailable,
     embedding,
     extract_claims,
+    model_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ def _reserve():
                     m.index_due_at, m.index_attempts, m.extraction_status
             )
             SELECT leased.*, v.snapshot FROM leased
-            JOIN memory_versions AS v
+            JOIN current_memory_snapshots AS v
               ON (v.workspace_id, v.subject_id, v.memory_id, v.revision)
                = (leased.workspace_id, leased.subject_id, leased.id, leased.revision)
         """).fetchone()
@@ -164,9 +166,14 @@ def process_next() -> None:
 def dispatch() -> None:
     connection = Redis.from_url(os.environ["REDIS_URL"])
     queue = Queue("memory", connection=connection, serializer="json")
+    next_review = 0.0
     while True:
         try:
-            if queue.count == 0:
+            if time.monotonic() >= next_review:
+                with connect() as db:
+                    mark_overdue_claims(db)
+                next_review = time.monotonic() + 30
+            if model_enabled() and queue.count == 0:
                 with connect() as db:
                     due = db.execute("""
                         SELECT 1 FROM memories WHERE index_due_at <= statement_timestamp()

@@ -8,13 +8,21 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "format": "prettier --write app eslint.config.mjs",
-    "format:check": "prettier --check app eslint.config.mjs"
+    "format": "prettier --write app eslint.config.mjs postcss.config.mjs",
+    "format:check": "prettier --check app eslint.config.mjs postcss.config.mjs"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.5",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "geist": "^1.9.2",
+    "lucide-react": "^1.75.0",
     "next": "16.4.6",
+    "postcss": "^8.5.33",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.5"
   },
   "devDependencies": {
     "eslint": "^9.39.0",

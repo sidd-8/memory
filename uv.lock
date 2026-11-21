@@ -51,6 +51,16 @@ dev = [
 name = "agent-memory-sdk"
 version = "0.1.0"
 source = { editable = "packages/sdk-python" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx2", specifier = ">=2,<3" },
+    { name = "pydantic", specifier = ">=2.10,<3" },
+]
 
 [[package]]
 name = "alembic"
